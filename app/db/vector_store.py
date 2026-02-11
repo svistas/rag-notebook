@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from app.config import get_settings
@@ -16,11 +17,40 @@ def set_chroma_client(client: Any | None) -> None:
 def get_chroma_client() -> Any:
     global _client
     if _client is None:
+        # Chroma's PostHog integration can be incompatible with newer `posthog` versions
+        # (signature mismatch for `capture()`), which produces noisy warnings. Since we
+        # don't want product telemetry in this portfolio app, force-disable PostHog and
+        # provide a no-op `capture` that accepts any args.
+        try:
+            import posthog  # type: ignore
+
+            posthog.disabled = True
+
+            def _capture_noop(*args: object, **kwargs: object) -> None:
+                return None
+
+            posthog.capture = _capture_noop  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        # Disable Chroma anonymized telemetry as early as possible.
+        # This prevents noisy "Failed to send telemetry event ..." warnings in some environments.
+        # Chroma docs show `ANONYMIZED_TELEMETRY=False` (capital F) as the expected form.
+        os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+        # Extra guard: Chroma uses PostHog under the hood for product telemetry.
+        # Disabling PostHog prevents capture attempts from printing warnings.
+        os.environ.setdefault("POSTHOG_DISABLED", "1")
+
         # Lazy import keeps startup memory lower until vector operations are needed.
         import chromadb
+        from chromadb.config import Settings as ChromaSettings
 
         settings = get_settings()
-        _client = chromadb.PersistentClient(path=str(settings.chroma_path))
+        # Disable Chroma anonymized telemetry to avoid noisy log warnings in some environments.
+        _client = chromadb.PersistentClient(
+            path=str(settings.chroma_path),
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
     return _client
 
 

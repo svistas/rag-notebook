@@ -40,6 +40,8 @@
   const chatForm = document.getElementById("chat-form");
   const chatInput = document.getElementById("chat-input");
   const chatLog = document.getElementById("chat-log");
+  let documentsPollHandle = null;
+  let lastUploadedDocId = null;
 
   function appendMessage(role, text, citations = []) {
     const wrapper = document.createElement("div");
@@ -78,7 +80,59 @@
     chatLog.scrollTop = chatLog.scrollHeight;
   }
 
-  async function refreshDocuments() {
+  function statusBadge(status) {
+    const base = "inline-flex items-center px-2 py-0.5 rounded text-xs border";
+    if (status === "indexed") return `${base} bg-emerald-50 text-emerald-700 border-emerald-200`;
+    if (status === "indexing") return `${base} bg-blue-50 text-blue-700 border-blue-200`;
+    if (status === "queued") return `${base} bg-amber-50 text-amber-700 border-amber-200`;
+    return `${base} bg-rose-50 text-rose-700 border-rose-200`;
+  }
+
+  async function deleteDoc(docId) {
+    const ok = confirm("Delete this document? This removes stored file and vectors.");
+    if (!ok) return;
+    const resp = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+    const payload = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      uploadStatus.textContent = payload.detail || "Delete failed.";
+      return;
+    }
+    if (lastUploadedDocId === docId) {
+      lastUploadedDocId = null;
+      uploadStatus.textContent = "Document deleted.";
+    }
+    await refreshDocuments();
+  }
+
+  async function reindexDoc(docId) {
+    const resp = await fetch(`/api/documents/${docId}/reindex`, { method: "POST" });
+    const payload = await resp.json();
+    if (!resp.ok) {
+      uploadStatus.textContent = payload.detail || "Reindex failed.";
+      return;
+    }
+    lastUploadedDocId = docId;
+    uploadStatus.textContent = `Reindex queued for ${payload.filename} (status: ${payload.status}).`;
+    await refreshDocuments(true);
+  }
+
+  function updateUploadStatusFromDoc(doc) {
+    if (!doc) return;
+    if (doc.status === "queued" || doc.status === "indexing") {
+      uploadStatus.textContent = `Indexing ${doc.filename}... (status: ${doc.status})`;
+      return;
+    }
+    if (doc.status === "indexed") {
+      uploadStatus.textContent = `Indexed ${doc.filename} (${doc.chunk_count} chunks).`;
+      return;
+    }
+    if (doc.status === "failed") {
+      const msg = doc.error_message ? `: ${doc.error_message}` : ".";
+      uploadStatus.textContent = `Indexing failed for ${doc.filename}${msg}`;
+    }
+  }
+
+  async function refreshDocuments(forcePoll = false) {
     const response = await fetch("/api/documents");
     const payload = await response.json();
     documentsList.innerHTML = "";
@@ -91,12 +145,78 @@
       return;
     }
 
+    let shouldPoll = false;
+    let lastDoc = null;
     payload.documents.forEach((doc) => {
+      if (lastUploadedDocId && doc.id === lastUploadedDocId) {
+        lastDoc = doc;
+      }
       const item = document.createElement("li");
-      item.className = "border border-slate-200 rounded p-2";
-      item.textContent = `${doc.filename} - ${doc.chunk_count} chunks`;
+      item.className = "border border-slate-200 rounded p-2 space-y-2";
+
+      const top = document.createElement("div");
+      // min-w-0 is important to keep action buttons from spilling out of the left panel.
+      top.className = "flex items-start justify-between gap-2 min-w-0";
+
+      const left = document.createElement("div");
+      left.className = "min-w-0";
+      const name = document.createElement("div");
+      name.className = "font-medium truncate";
+      name.textContent = doc.filename;
+      left.appendChild(name);
+
+      const meta = document.createElement("div");
+      meta.className = "text-xs text-slate-600";
+      meta.textContent = `${doc.chunk_count} chunks`;
+      left.appendChild(meta);
+
+      if (doc.error_message) {
+        const err = document.createElement("div");
+        err.className = "text-xs text-rose-700 mt-1";
+        err.textContent = doc.error_message;
+        left.appendChild(err);
+      }
+
+      const right = document.createElement("div");
+      right.className = "flex items-center gap-2 shrink-0";
+      const badge = document.createElement("span");
+      badge.className = statusBadge(doc.status);
+      badge.textContent = doc.status;
+      right.appendChild(badge);
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50";
+      delBtn.textContent = "Delete";
+      delBtn.onclick = () => deleteDoc(doc.id);
+      right.appendChild(delBtn);
+
+      const reBtn = document.createElement("button");
+      reBtn.className = "px-2 py-1 text-xs rounded border border-slate-300 hover:bg-slate-50";
+      reBtn.textContent = "Reindex";
+      reBtn.onclick = () => reindexDoc(doc.id);
+      right.appendChild(reBtn);
+
+      top.appendChild(left);
+      top.appendChild(right);
+      item.appendChild(top);
       documentsList.appendChild(item);
+
+      if (doc.status === "queued" || doc.status === "indexing") {
+        shouldPoll = true;
+      }
     });
+
+    if (lastDoc) {
+      updateUploadStatusFromDoc(lastDoc);
+    }
+
+    if ((shouldPoll || forcePoll) && !documentsPollHandle) {
+      documentsPollHandle = setInterval(() => refreshDocuments(), 2000);
+    }
+    if (!shouldPoll && documentsPollHandle) {
+      clearInterval(documentsPollHandle);
+      documentsPollHandle = null;
+    }
   }
 
   uploadForm.addEventListener("submit", async (event) => {
@@ -108,7 +228,7 @@
 
     const formData = new FormData();
     formData.append("file", fileInput.files[0]);
-    uploadStatus.textContent = "Uploading and indexing...";
+    uploadStatus.textContent = "Uploading (indexing will run in background)...";
 
     const response = await fetch("/api/upload", { method: "POST", body: formData });
     const payload = await response.json();
@@ -118,9 +238,10 @@
       return;
     }
 
-    uploadStatus.textContent = `Indexed ${payload.document.filename} (${payload.document.chunk_count} chunks).`;
+    lastUploadedDocId = payload.document.id;
+    uploadStatus.textContent = `Upload accepted: ${payload.document.filename} (status: ${payload.document.status}).`;
     fileInput.value = "";
-    await refreshDocuments();
+    await refreshDocuments(true);
   });
 
   chatForm.addEventListener("submit", async (event) => {

@@ -1,4 +1,4 @@
-# RAG Notebook (Week 1)
+# RAG Notebook (Weeks 1-2)
 
 RAG Notebook is a production-style Retrieval-Augmented Generation portfolio project built in weekly vertical slices.
 
@@ -7,6 +7,11 @@ Week 1 delivers an end-to-end MVP:
 - Chunk and embed them with OpenAI embeddings
 - Store vectors locally in ChromaDB
 - Ask questions and receive citation-based answers
+
+Week 2 adds document management:
+- Document library shows indexing state (`queued`, `indexing`, `indexed`, `failed`)
+- Upload returns immediately and indexing runs in the background
+- Delete and reindex document actions
 
 ## Tech Stack
 
@@ -72,8 +77,10 @@ poetry run pytest -q
 1. Start the app.
 2. Upload a `.txt` or `.md` document from the left panel.
 3. Confirm it appears in the document library.
-4. Ask a question in the chat panel.
-5. Verify the response includes inline citation markers (`[1]`, `[2]`) and expandable source excerpts.
+4. Watch the document status move from `queued` -> `indexing` -> `indexed`.
+5. Ask a question in the chat panel.
+6. Verify the response includes inline citation markers (`[1]`, `[2]`) and expandable source excerpts.
+7. Try `Reindex` and `Delete` from the library.
 
 ## Week 1 Security Baselines
 
@@ -82,12 +89,14 @@ poetry run pytest -q
 - Filename sanitization before saving
 - Secrets excluded via `.env` and `.gitignore`
 
-## Week 2 Backlog
+## Week 2 Notes
 
-- Add document delete endpoint and UI action
-- Reindex flow for updated documents
-- Indexing status field and progress states
-- Move ingest to FastAPI background tasks
-- Add optional PDF parsing (basic support)
-- Persist richer metadata schema (e.g., content hash, timestamps, source type)
+- Upload immediately returns a `queued` document and indexing happens asynchronously using FastAPI background tasks.
+- Document metadata is stored locally in `data/documents.json` (kept intentionally simple for Week 2).
+
+## Week 3 Backlog (Preview)
+
+- Retrieval quality upgrades (query rewriting or hybrid search)
+- Debug UI showing retrieved chunks + scores per chat request
+- Golden Q/A dataset and deterministic eval mode
 

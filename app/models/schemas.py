@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -44,7 +45,10 @@ class DocumentMetadata(BaseModel):
     filename: str
     chunk_count: int
     uploaded_at: datetime
-    status: str = "indexed"
+    status: Literal["queued", "indexing", "indexed", "failed"] = "indexed"
+    stored_filename: str | None = None
+    indexed_at: datetime | None = None
+    error_message: str | None = None
 
 
 class UploadResponse(BaseModel):
