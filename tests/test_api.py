@@ -19,6 +19,23 @@ async def test_upload_endpoint_rejects_invalid_file_extension(api_client) -> Non
     assert response.status_code == 400
 
 
+async def test_upload_endpoint_accepts_pdf_file(api_client, monkeypatch) -> None:
+    # Avoid having to construct a real PDF in tests; just ensure the pipeline calls the extractor.
+    from app.services import pdf_service
+
+    monkeypatch.setattr(pdf_service, "extract_text_from_pdf", lambda _b: "PDF extracted text")
+
+    files = {"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")}
+    upload_resp = await api_client.post("/api/upload", files=files)
+    assert upload_resp.status_code == 200
+    doc_id = upload_resp.json()["document"]["id"]
+
+    index_document(doc_id)
+    doc_resp = await api_client.get(f"/api/documents/{doc_id}")
+    assert doc_resp.status_code == 200
+    assert doc_resp.json()["status"] == "indexed"
+
+
 async def test_chat_endpoint_returns_answer_with_citations(api_client) -> None:
     files = {"file": ("guide.md", io.BytesIO(b"RAG uses retrieval and generation with grounding."), "text/markdown")}
     upload_response = await api_client.post("/api/upload", files=files)

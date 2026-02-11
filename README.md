@@ -3,7 +3,7 @@
 RAG Notebook is a production-style Retrieval-Augmented Generation portfolio project built in weekly vertical slices.
 
 Week 1 delivers an end-to-end MVP:
-- Upload `.txt` or `.md` documents
+- Upload `.txt` or `.md` documents (Week 2 stretch adds basic `.pdf`)
 - Chunk and embed them with OpenAI embeddings
 - Store vectors locally in ChromaDB
 - Ask questions and receive citation-based answers
@@ -81,6 +81,7 @@ poetry run pytest -q
 
 1. Start the app.
 2. Upload a `.txt` or `.md` document from the left panel.
+   - PDFs are supported as a basic stretch (text extraction quality depends on the PDF).
 3. Confirm it appears in the document library.
 4. Watch the document status move from `queued` -> `indexing` -> `indexed`.
 5. Ask a question in the chat panel.

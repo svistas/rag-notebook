@@ -12,8 +12,9 @@ from app.db.vector_store import add_chunks, delete_document
 from app.models.schemas import DocumentMetadata
 from app.rag.chunking import chunk_text
 from app.rag.embedding import get_embeddings
+from app.services import pdf_service
 
-_ALLOWED_EXTENSIONS = {".txt", ".md"}
+_ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +92,12 @@ def create_document_record(filename: str, content: bytes) -> DocumentMetadata:
     if len(content) > max_bytes:
         raise ValueError(f"File exceeds {settings.max_upload_size_mb} MB limit")
 
-    # Early decode check so we fail fast for non-UTF8 input.
-    try:
-        content.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError("File must be UTF-8 encoded text") from exc
+    # Early decode check so we fail fast for non-UTF8 input (text formats only).
+    if extension in {".txt", ".md"}:
+        try:
+            content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("File must be UTF-8 encoded text") from exc
 
     doc_id = str(uuid.uuid4())
     destination = settings.upload_path / f"{doc_id}_{safe_name}"
@@ -109,7 +111,7 @@ def create_document_record(filename: str, content: bytes) -> DocumentMetadata:
         uploaded_at=datetime.now(timezone.utc),
         status="queued",
     )
-    logger.info("upload.accepted", extra={"doc_id": doc_id, "filename": safe_name})
+    logger.info("upload.accepted", extra={"doc_id": doc_id, "document_name": safe_name})
     return _upsert_document(metadata)
 
 
@@ -122,7 +124,7 @@ def index_document(doc_id: str) -> DocumentMetadata:
     existing.error_message = None
     _upsert_document(existing)
 
-    logger.info("index.start", extra={"doc_id": doc_id, "filename": existing.filename})
+    logger.info("index.start", extra={"doc_id": doc_id, "document_name": existing.filename})
 
     stored_path = _find_stored_path(doc_id, existing.stored_filename)
     if stored_path is None:
@@ -133,7 +135,13 @@ def index_document(doc_id: str) -> DocumentMetadata:
 
     try:
         content = stored_path.read_bytes()
-        text = content.decode("utf-8")
+        ext = stored_path.suffix.lower()
+        if ext in {".txt", ".md"}:
+            text = content.decode("utf-8")
+        elif ext == ".pdf":
+            text = pdf_service.extract_text_from_pdf(content)
+        else:
+            raise ValueError(f"Unsupported file type: {ext}")
 
         chunks = chunk_text(text=text, chunk_size=get_settings().chunk_size, overlap=get_settings().chunk_overlap)
         if not chunks:
@@ -149,14 +157,14 @@ def index_document(doc_id: str) -> DocumentMetadata:
         _upsert_document(existing)
         logger.info(
             "index.complete",
-            extra={"doc_id": doc_id, "filename": existing.filename, "chunk_count": existing.chunk_count},
+            extra={"doc_id": doc_id, "document_name": existing.filename, "chunk_count": existing.chunk_count},
         )
         return existing
     except Exception as exc:  # noqa: BLE001 - persist failure for UI debugging
         existing.status = "failed"
         existing.error_message = str(exc)
         _upsert_document(existing)
-        logger.exception("index.failed", extra={"doc_id": doc_id, "filename": existing.filename})
+        logger.exception("index.failed", extra={"doc_id": doc_id, "document_name": existing.filename})
         return existing
 
 
