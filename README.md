@@ -1,207 +1,167 @@
-# RAG Notebook (Weeks 1-6)
+# RAG Notebook
 
-RAG Notebook is a production-style Retrieval-Augmented Generation portfolio project built in weekly vertical slices.
+Production-style RAG (Retrieval-Augmented Generation) web app: upload documents, ask questions, and get grounded answers with citations. Built as weekly vertical slices with a focus on real-world concerns: auth/multi-tenancy, retrieval quality, evaluation, observability, and deployment.
 
-Week 1 delivers an end-to-end MVP:
-- Upload `.txt` or `.md` documents (Week 2 stretch adds basic `.pdf`)
-- Chunk and embed them with OpenAI embeddings
-- Store vectors locally in ChromaDB
-- Ask questions and receive citation-based answers
+- Demo: `https://<your-railway-app>.up.railway.app` (deploying; link will be updated)
+- Contact (consulting): `<your-linkedin-url>`
 
-Week 2 adds document management:
-- Document library shows indexing state (`queued`, `indexing`, `indexed`, `failed`)
-- Upload returns immediately and indexing runs in the background
-- Delete and reindex document actions
+If you need help shipping an LLM/RAG feature from prototype to production (architecture, retrieval quality, evals, observability, deployment), this repo is a representative example of my approach.
 
-Week 3 improves retrieval quality:
-- Query rewriting before vector search
-- Lightweight reranking of retrieved chunks
-- Debug mode in UI showing rewritten query + chunk selection
+RAG is a strong fit when your users need answers grounded in your domain content: policy docs, product manuals, internal wikis, SOPs, support tickets, contracts, or technical knowledge bases. It’s especially valuable when “search results” aren’t enough and you want a natural-language interface with citations, traceability, and access control. If your problem is purely creative generation or you don’t have reliable source material, a simpler LLM workflow may be a better starting point.
 
-Week 4 adds auth + multi-user isolation:
-- Register/login/logout with JWT cookie sessions
-- Per-user document isolation for upload/list/delete/chat
-- Storage backed by Postgres + pgvector (dev via Docker Compose)
+## Consulting Services
 
-Week 6 adds lightweight observability:
-- `X-Request-ID` on every HTTP response
-- Structured JSON logs with request-scoped fields (`request_id`, `user_id`, etc.)
-- Auth-required `/api/metrics` endpoint for basic request + OpenAI counters/latencies
+I help teams build and ship RAG systems that are:
+
+- Grounded (citations, defensible retrieval behavior)
+- Measurable (evals, failure-mode visibility, cost/latency tracking)
+- Deployable (repeatable environments, migrations, reliability basics)
+
+Typical engagements:
+
+- RAG architecture + implementation (FastAPI + Postgres/pgvector, chunking/retrieval/rerank/prompting)
+- Retrieval quality audits (debug traces, eval suite setup, targeted fixes)
+- Production readiness (observability, deployment to Railway, CI-friendly testing)
+
+If you want to discuss a project, message me on LinkedIn: `<your-linkedin-url>`.
+
+## What's This Project About
+
+- End-to-end RAG pipeline: chunking, embeddings, retrieval, reranking, prompting, citations
+- Multi-user SaaS basics: auth, session cookies, tenant isolation, access control
+- Quality tooling: lightweight offline eval harness to catch regressions
+- Observability: request IDs, structured logs, and simple metrics for cost/latency tracking
+- Deployment readiness: Dockerfile, Docker Compose, and Railway configuration
+
+## Architecture
+
+```mermaid
+flowchart TD
+  Browser[Browser_UI] -->|HTTP| FastAPI[FastAPI_App]
+
+  subgraph api [FastAPI]
+    Mw[RequestContextMiddleware]
+    Auth[get_current_user]
+    Routes[API_Routes]
+    MetricsUI[Metrics_Page]
+  end
+
+  FastAPI --> Mw --> Routes
+  Routes --> Auth
+
+  subgraph rag [RAG_Pipeline]
+    Chunking[Chunking]
+    Embeddings[Embeddings_OpenAI]
+    Retrieval[Vector_Retrieval]
+    Rewrite[Query_Rewrite]
+    Rerank[Rerank]
+    Prompt[Prompting_Answer]
+  end
+
+  Routes --> Chunking
+  Routes --> Embeddings
+  Routes --> Retrieval
+  Routes --> Rewrite
+  Routes --> Rerank
+  Routes --> Prompt
+
+  subgraph storage [Storage]
+    Postgres[(Postgres_pgvector)]
+    Uploads[(Uploaded_Files)]
+  end
+
+  Routes --> Postgres
+  Routes --> Uploads
+  Retrieval --> Postgres
+  Embeddings --> Postgres
+
+  subgraph obs [Observability]
+    Logs[Structured_JSON_Logs]
+    MetricsAPI[/api/metrics]
+    InMem[InMemory_Metrics]
+  end
+
+  Mw --> Logs
+  Mw --> InMem
+  Routes --> MetricsAPI --> InMem
+  Browser --> MetricsUI --> MetricsAPI
+```
+
+## Key Decisions (And Why)
+
+- JWT in an HTTP-only cookie for sessions: simple, UI-friendly, and realistic for a small app.
+- Postgres + pgvector for vectors: single system of record, easy tenant filtering, deployment-friendly.
+- Query rewrite + rerank: improves grounding and citation quality versus naive top-k similarity.
+- Debug mode in UI: makes RAG behavior explainable and tunable.
+- In-memory metrics (Week 6): intentionally lightweight; enough to reason about request/OpenAI cost and latency locally.
+- Railway + Docker (Week 7): repeatable deployments with a pre-deploy migration command.
+
+
+## Feature Highlights (By Week)
+
+- Week 1: upload + chunk + embed + chat with citations
+- Week 2: document library + background indexing + delete/reindex
+- Week 3: query rewrite + rerank + UI debug trace
+- Week 4: auth + user isolation + Postgres/pgvector
+- Week 5: offline eval harness (mock mode for deterministic CI-style tests)
+- Week 6: observability (request IDs, structured logs, `/api/metrics`, `/metrics` page)
+- Week 7: deployment (Dockerfile, Compose stack, Railway config-as-code)
 
 ## Tech Stack
 
-- Python 3.11+
-- FastAPI + Jinja2 templates
+- Python 3.11, FastAPI, Jinja2
+- Postgres + pgvector, SQLAlchemy, Alembic
 - OpenAI Python SDK
-- ChromaDB (local persistent vector store)
-- Pydantic Settings
+- structlog (JSON logs)
 - pytest + httpx
-- Poetry dependency management
 
-## Project Structure
-
-```text
-app/
-  api/            # Upload, chat, documents endpoints
-  observability/  # Request context, structured logs, in-memory metrics
-  services/       # Ingestion orchestration
-  models/         # Pydantic schemas
-  rag/            # Chunking, embedding, retrieval, prompting
-  db/             # Chroma vector store wrapper
-  templates/      # HTML UI
-data/             # Local uploaded files + metadata
-tests/            # Unit and API tests
-docs/             # Learning notes
-```
-
-## Local Setup
-
-1. Install dependencies:
+## Quickstart (Local Dev)
 
 ```bash
 poetry install --no-root
-```
-
-2. Create your environment file:
-
-```bash
 cp .env.example .env
-```
-
-3. Add your OpenAI key in `.env`:
-
-```env
-OPENAI_API_KEY=your-real-key
-```
-
-4. Start Postgres (Week 4):
-
-```bash
 docker compose up -d db
-```
-
-5. Run DB migrations:
-
-```bash
 poetry run alembic upgrade head
-```
-
-## Run the App
-
-```bash
 poetry run uvicorn app.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000`.
 
-## Run With Docker Compose (Week 7)
-
-This runs the full stack (app + Postgres) and automatically applies migrations on startup.
-
-```bash
-docker compose up --build
-```
-
-- App: `http://127.0.0.1:8000`
-- Postgres: exposed on `localhost:5432`
-- Persistent data:
-  - uploads: `rag_notebook_uploads` volume
-  - chroma: `rag_notebook_chroma` volume
-
-Environment variables are read from your shell (and you can still use `.env` locally). At minimum, set:
+## Run With Docker Compose
 
 ```bash
 export OPENAI_API_KEY="..."
 export JWT_SECRET="..."
+docker compose up --build
 ```
 
-## Deploy To Railway (Week 7)
+## Deploy To Railway
 
-Deployment uses the repo `Dockerfile`, Railway Postgres, a Railway Volume mounted at `/data`, and a Pre-deploy Command to run migrations.
+This repo includes `railway.toml` (config-as-code) for Dockerfile deployments.
 
-1. Create a new Railway project and connect this repo.
-2. Add a Postgres service/plugin and set `DATABASE_URL` for the app service (Railway provides this).
-3. Add a Railway Volume to the app service:
-   - mount path: `/data`
-4. Set environment variables on the app service:
-   - `OPENAI_API_KEY`: your key
-   - `JWT_SECRET`: a long random secret
-   - `UPLOAD_DIR=/data/uploads`
-   - `CHROMA_DIR=/data/chroma`
-5. Configure commands:
-   - Start Command: `bash docker/start.sh`
-   - Pre-deploy Command: `bash docker/migrate.sh`
+- Add Railway Postgres and set `DATABASE_URL` for the app service (Railway provides it).
+- Add a Railway Volume mounted at `/data` and set:
+  - `UPLOAD_DIR=/data/uploads`
+  - Optional: `CHROMA_DIR=/data/chroma` (kept for legacy/local experiments; primary vectors live in Postgres)
+- Set secrets:
+  - `OPENAI_API_KEY`
+  - `JWT_SECRET`
 
-Notes:
-- Railway sets `PORT` automatically; the start script binds to it.
-- If you don’t attach a Volume, uploads and Chroma data will be ephemeral.
+Deploy behavior:
+- Start command: `bash docker/start.sh` (binds to Railway-provided `PORT`)
+- Pre-deploy command: `bash docker/migrate.sh` (runs `alembic upgrade head`)
 
-## Observability (Week 6)
+## Observability
 
-- `X-Request-ID`: included on every response. Use it to correlate a client error with server logs.
-- Structured logs: emitted as JSON and include `request_id` and (when authenticated) `user_id`.
-- Metrics endpoint:
-  - `GET /api/metrics` (auth required)
-  - Toggle with `ENABLE_METRICS_ENDPOINT=True|False` (default true)
-  - Metrics are in-memory and reset on server restart
+- Every response includes `X-Request-ID` (use it to correlate client errors with server logs).
+- Metrics:
+  - UI: `GET /metrics`
+  - API: `GET /api/metrics` (auth required)
 
-## Offline Evaluation (Week 5)
-
-Run a small golden dataset through the RAG pipeline and write a JSON report:
-
-```bash
-poetry run python -m app.eval --dataset eval/golden.jsonl --out eval/results/latest.json --cleanup
-```
-
-Deterministic mode (no network, good for CI):
-
-```bash
-poetry run python -m app.eval --mock --max-cases 2
-```
-
-What it checks (lightweight heuristics):
-- `retrieval_hit`: required document appears in retrieved chunks
-- `citations_match`: required document appears in citations list
-- `keyword_coverage`: answer contains expected keywords
-- `no_forbidden_keywords`: answer avoids forbidden keywords
-- `abstention_ok`: for \"not in docs\" cases, answer shows uncertainty
-
-## Run Tests
+## Testing
 
 ```bash
 poetry run pytest -q
 ```
 
-## Demo Instructions
-
-1. Start the app.
-2. Upload a `.txt` or `.md` document from the left panel.
-   - PDFs are supported as a basic stretch (text extraction quality depends on the PDF).
-3. Confirm it appears in the document library.
-4. Watch the document status move from `queued` -> `indexing` -> `indexed`.
-5. Ask a question in the chat panel.
-6. Verify the response includes inline citation markers (`[1]`, `[2]`) and expandable source excerpts.
-7. Try `Reindex` and `Delete` from the library.
-8. Toggle `Debug mode` and ask the same question again to inspect rewritten query and retrieved chunks.
-9. Log out, register a second user, and confirm documents are private per account.
-
-## Week 1 Security Baselines
-
-- File type validation (`.txt`, `.md`)
-- Upload size limit via config (`MAX_UPLOAD_SIZE_MB`)
-- Filename sanitization before saving
-- Secrets excluded via `.env` and `.gitignore`
-
-## Week 2 Notes
-
-- Upload immediately returns a `queued` document and indexing happens asynchronously using FastAPI background tasks.
-- Document metadata is stored locally in `data/documents.json` (kept intentionally simple for Week 2).
-
-## Week 3 Notes
-
-- Debug mode adds a `debug` flag to `/api/chat` responses so you can see:\n  - rewritten query\n  - initial retrieved chunk list\n  - final reranked chunk list\n+- Query rewriting and reranking are controlled by env flags:\n  - `ENABLE_QUERY_REWRITE`\n  - `ENABLE_RERANK`\n  - `RERANK_TOP_N`\n  - `REWRITE_MODEL`\n  - `RERANK_MODEL`\n+
-## Future Backlog (Preview)
-
-- Persist metrics (Prometheus / StatsD) instead of in-memory only
-- Distributed tracing (OpenTelemetry) for deeper performance debugging
 
