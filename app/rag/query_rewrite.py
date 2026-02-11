@@ -6,6 +6,7 @@ from typing import Any
 from openai import OpenAI
 
 from app.config import get_settings
+from app.observability.openai import instrument_openai_call
 
 _rewrite_client: Any | None = None
 
@@ -49,13 +50,18 @@ def rewrite_query(user_query: str, model: str | None = None) -> RewriteResult:
     )
     user_prompt = f"User question:\n{cleaned}\n\nRewritten retrieval query:"
 
-    response = client.chat.completions.create(
-        model=model or getattr(settings, "rewrite_model", settings.openai_model),
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.0,
+    actual_model = model or getattr(settings, "rewrite_model", settings.openai_model)
+    response = instrument_openai_call(
+        operation="chat.completions.create",
+        model=actual_model,
+        fn=lambda: client.chat.completions.create(
+            model=actual_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+        ),
     )
     rewritten = (response.choices[0].message.content or "").strip()
     if not rewritten:

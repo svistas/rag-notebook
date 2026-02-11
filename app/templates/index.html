@@ -10,7 +10,10 @@
         <p class="text-xs text-slate-500 mt-2">Signed in as {{ user_email }}</p>
         {% endif %}
       </div>
-      <button id="logout-btn" class="px-3 py-2 rounded border border-slate-300 hover:bg-slate-50 text-sm">Logout</button>
+      <div class="flex items-center gap-2">
+        <a href="/metrics" class="px-3 py-2 rounded border border-slate-300 hover:bg-slate-50 text-sm">Metrics</a>
+        <button id="logout-btn" class="px-3 py-2 rounded border border-slate-300 hover:bg-slate-50 text-sm">Logout</button>
+      </div>
     </div>
   </header>
 

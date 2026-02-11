@@ -13,6 +13,12 @@ async def _register_and_login(api_client, email: str, password: str) -> str:
     return me.json()["id"]
 
 
+async def test_responses_include_x_request_id(api_client) -> None:
+    resp = await api_client.get("/health")
+    assert resp.status_code == 200
+    assert resp.headers.get("x-request-id")
+
+
 async def test_upload_endpoint_accepts_text_file(api_client) -> None:
     user_id = await _register_and_login(api_client, "a@example.com", "password123")
     files = {"file": ("notes.txt", io.BytesIO(b"RAG stands for Retrieval Augmented Generation."), "text/plain")}

@@ -8,6 +8,7 @@ from openai import OpenAI
 
 from app.config import get_settings
 from app.models.schemas import RetrievedChunk
+from app.observability.openai import instrument_openai_call
 
 _rerank_client: Any | None = None
 
@@ -67,13 +68,18 @@ def rerank(query: str, chunks: list[RetrievedChunk], top_n: int, model: str | No
     )
 
     try:
-        response = client.chat.completions.create(
-            model=model or getattr(settings, "rerank_model", settings.openai_model),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.0,
+        actual_model = model or getattr(settings, "rerank_model", settings.openai_model)
+        response = instrument_openai_call(
+            operation="chat.completions.create",
+            model=actual_model,
+            fn=lambda: client.chat.completions.create(
+                model=actual_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+            ),
         )
         content = (response.choices[0].message.content or "").strip()
         parsed = json.loads(content)

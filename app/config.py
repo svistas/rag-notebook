@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     chroma_dir: str = Field(default=".chroma", alias="CHROMA_DIR")
     chroma_collection: str = Field(default="documents", alias="CHROMA_COLLECTION")
     max_upload_size_mb: int = Field(default=5, alias="MAX_UPLOAD_SIZE_MB")
+    enable_metrics_endpoint: bool = Field(default=True, alias="ENABLE_METRICS_ENDPOINT")
 
     database_url: str = Field(
         default="postgresql+psycopg://rag:rag@localhost:5432/rag_notebook",

@@ -1,0 +1,9 @@
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+startCommand = "bash docker/start.sh"
+preDeployCommand = "bash docker/migrate.sh"
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+

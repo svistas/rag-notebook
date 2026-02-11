@@ -7,6 +7,7 @@ from openai import OpenAI
 
 from app.config import get_settings
 from app.models.schemas import ChatResponse, Citation, RetrievedChunk
+from app.observability.openai import instrument_openai_call
 
 _chat_client: Any | None = None
 
@@ -64,10 +65,14 @@ def generate_answer(query: str, chunks: list[RetrievedChunk]) -> ChatResponse:
     settings = get_settings()
     client = get_chat_client()
 
-    response = client.chat.completions.create(
+    response = instrument_openai_call(
+        operation="chat.completions.create",
         model=settings.openai_model,
-        messages=messages,
-        temperature=0.1,
+        fn=lambda: client.chat.completions.create(
+            model=settings.openai_model,
+            messages=messages,
+            temperature=0.1,
+        ),
     )
     answer = response.choices[0].message.content or "I am unsure based on the available context."
 

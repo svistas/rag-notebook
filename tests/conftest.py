@@ -12,6 +12,7 @@ from app.db.vector_store import set_chroma_client
 from app.db.models import Base
 from app.db.session import get_engine
 from app.main import app
+from app.observability.metrics import reset_metrics
 from app.rag.embedding import set_embedding_client
 from app.rag.prompting import set_chat_client
 from app.rag.query_rewrite import set_rewrite_client
@@ -145,6 +146,7 @@ class MockChromaClient:
 
 @pytest.fixture(autouse=True)
 def test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    reset_metrics()
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "chroma"))

@@ -1,4 +1,4 @@
-# RAG Notebook (Weeks 1-4)
+# RAG Notebook (Weeks 1-6)
 
 RAG Notebook is a production-style Retrieval-Augmented Generation portfolio project built in weekly vertical slices.
 
@@ -23,6 +23,11 @@ Week 4 adds auth + multi-user isolation:
 - Per-user document isolation for upload/list/delete/chat
 - Storage backed by Postgres + pgvector (dev via Docker Compose)
 
+Week 6 adds lightweight observability:
+- `X-Request-ID` on every HTTP response
+- Structured JSON logs with request-scoped fields (`request_id`, `user_id`, etc.)
+- Auth-required `/api/metrics` endpoint for basic request + OpenAI counters/latencies
+
 ## Tech Stack
 
 - Python 3.11+
@@ -38,6 +43,7 @@ Week 4 adds auth + multi-user isolation:
 ```text
 app/
   api/            # Upload, chat, documents endpoints
+  observability/  # Request context, structured logs, in-memory metrics
   services/       # Ingestion orchestration
   models/         # Pydantic schemas
   rag/            # Chunking, embedding, retrieval, prompting
@@ -71,7 +77,7 @@ OPENAI_API_KEY=your-real-key
 4. Start Postgres (Week 4):
 
 ```bash
-docker compose up -d
+docker compose up -d db
 ```
 
 5. Run DB migrations:
@@ -87,6 +93,57 @@ poetry run uvicorn app.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000`.
+
+## Run With Docker Compose (Week 7)
+
+This runs the full stack (app + Postgres) and automatically applies migrations on startup.
+
+```bash
+docker compose up --build
+```
+
+- App: `http://127.0.0.1:8000`
+- Postgres: exposed on `localhost:5432`
+- Persistent data:
+  - uploads: `rag_notebook_uploads` volume
+  - chroma: `rag_notebook_chroma` volume
+
+Environment variables are read from your shell (and you can still use `.env` locally). At minimum, set:
+
+```bash
+export OPENAI_API_KEY="..."
+export JWT_SECRET="..."
+```
+
+## Deploy To Railway (Week 7)
+
+Deployment uses the repo `Dockerfile`, Railway Postgres, a Railway Volume mounted at `/data`, and a Pre-deploy Command to run migrations.
+
+1. Create a new Railway project and connect this repo.
+2. Add a Postgres service/plugin and set `DATABASE_URL` for the app service (Railway provides this).
+3. Add a Railway Volume to the app service:
+   - mount path: `/data`
+4. Set environment variables on the app service:
+   - `OPENAI_API_KEY`: your key
+   - `JWT_SECRET`: a long random secret
+   - `UPLOAD_DIR=/data/uploads`
+   - `CHROMA_DIR=/data/chroma`
+5. Configure commands:
+   - Start Command: `bash docker/start.sh`
+   - Pre-deploy Command: `bash docker/migrate.sh`
+
+Notes:
+- Railway sets `PORT` automatically; the start script binds to it.
+- If you don’t attach a Volume, uploads and Chroma data will be ephemeral.
+
+## Observability (Week 6)
+
+- `X-Request-ID`: included on every response. Use it to correlate a client error with server logs.
+- Structured logs: emitted as JSON and include `request_id` and (when authenticated) `user_id`.
+- Metrics endpoint:
+  - `GET /api/metrics` (auth required)
+  - Toggle with `ENABLE_METRICS_ENDPOINT=True|False` (default true)
+  - Metrics are in-memory and reset on server restart
 
 ## Offline Evaluation (Week 5)
 
@@ -143,9 +200,8 @@ poetry run pytest -q
 ## Week 3 Notes
 
 - Debug mode adds a `debug` flag to `/api/chat` responses so you can see:\n  - rewritten query\n  - initial retrieved chunk list\n  - final reranked chunk list\n+- Query rewriting and reranking are controlled by env flags:\n  - `ENABLE_QUERY_REWRITE`\n  - `ENABLE_RERANK`\n  - `RERANK_TOP_N`\n  - `REWRITE_MODEL`\n  - `RERANK_MODEL`\n+
-## Week 4 Backlog (Preview)
+## Future Backlog (Preview)
 
-- Evaluation harness (golden dataset + deterministic mode)
-- Observability (structured logs + request tracing)
-- Cost and latency tracking for rewrite/rerank calls
+- Persist metrics (Prometheus / StatsD) instead of in-memory only
+- Distributed tracing (OpenTelemetry) for deeper performance debugging
 

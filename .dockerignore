@@ -1,0 +1,28 @@
+.env
+.env.*
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local runtime data (should be volume-mounted in deploys)
+data/
+.chroma/
+
+# Dev/editor artifacts
+.cursor/
+.vscode/
+terminals/
+
+# Evaluation outputs
+eval/results/
+
+# OS junk
+.DS_Store
+

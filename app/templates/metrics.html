@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6">
+  <header class="bg-white rounded-xl border border-slate-200 p-5">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold">Metrics</h1>
+        <p class="text-slate-600 mt-2">Lightweight in-memory counters and latency aggregates (resets on restart).</p>
+        {% if user_email %}
+        <p class="text-xs text-slate-500 mt-2">Signed in as {{ user_email }}</p>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/" class="px-3 py-2 rounded border border-slate-300 hover:bg-slate-50 text-sm">Back</a>
+        <button id="logout-btn" class="px-3 py-2 rounded border border-slate-300 hover:bg-slate-50 text-sm">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="text-sm text-slate-700">
+        <span class="font-medium">Status:</span>
+        <span id="status" class="text-slate-600">Loading...</span>
+      </div>
+      <div class="text-xs text-slate-600">
+        <span>Last updated:</span> <span id="updated-at">-</span>
+        <span class="mx-2">|</span>
+        <span>Last request id:</span> <span id="last-request-id" class="font-mono">-</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div class="border border-slate-200 rounded-lg p-4">
+        <h2 class="font-medium">Counters</h2>
+        <dl class="mt-3 space-y-2 text-sm">
+          <div class="flex items-center justify-between"><dt>http_requests_total</dt><dd id="http-requests" class="font-mono">-</dd></div>
+          <div class="flex items-center justify-between"><dt>openai_calls_total</dt><dd id="openai-calls" class="font-mono">-</dd></div>
+          <div class="flex items-center justify-between"><dt>openai_tokens_total</dt><dd id="openai-tokens" class="font-mono">-</dd></div>
+        </dl>
+      </div>
+
+      <div class="border border-slate-200 rounded-lg p-4">
+        <h2 class="font-medium">HTTP Latency (ms)</h2>
+        <dl class="mt-3 space-y-2 text-sm">
+          <div class="flex items-center justify-between"><dt>count</dt><dd id="http-count" class="font-mono">-</dd></div>
+          <div class="flex items-center justify-between"><dt>avg</dt><dd id="http-avg" class="font-mono">-</dd></div>
+          <div class="flex items-center justify-between"><dt>max</dt><dd id="http-max" class="font-mono">-</dd></div>
+        </dl>
+      </div>
+
+      <div class="border border-slate-200 rounded-lg p-4">
+        <h2 class="font-medium">OpenAI Latency (ms)</h2>
+        <dl class="mt-3 space-y-2 text-sm">
+          <div class="flex items-center justify-between"><dt>count</dt><dd id="openai-count" class="font-mono">-</dd></div>
+          <div class="flex items-center justify-between"><dt>avg</dt><dd id="openai-avg" class="font-mono">-</dd></div>
+          <div class="flex items-center justify-between"><dt>max</dt><dd id="openai-max" class="font-mono">-</dd></div>
+        </dl>
+      </div>
+    </div>
+
+    <details class="border border-slate-200 rounded-lg p-4 bg-slate-50">
+      <summary class="cursor-pointer text-sm font-medium text-slate-800">Raw JSON</summary>
+      <pre id="raw" class="mt-3 text-xs overflow-x-auto whitespace-pre-wrap"></pre>
+    </details>
+  </section>
+</div>
+
+<script>
+  const statusEl = document.getElementById("status");
+  const updatedAtEl = document.getElementById("updated-at");
+  const requestIdEl = document.getElementById("last-request-id");
+  const rawEl = document.getElementById("raw");
+  const logoutBtn = document.getElementById("logout-btn");
+
+  function fmtNum(x) {
+    if (x === null || x === undefined) return "-";
+    if (typeof x === "number") return String(x);
+    return String(x);
+  }
+
+  function fmtMs(x) {
+    if (x === null || x === undefined) return "-";
+    const n = Number(x);
+    if (!Number.isFinite(n)) return "-";
+    return n.toFixed(2);
+  }
+
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }
+
+  function render(payload) {
+    const counters = payload?.counters || {};
+    const latency = payload?.latency_ms || {};
+
+    setText("http-requests", fmtNum(counters.http_requests_total));
+    setText("openai-calls", fmtNum(counters.openai_calls_total));
+    setText("openai-tokens", fmtNum(counters.openai_tokens_total));
+
+    const httpAgg = latency.http_request_ms || {};
+    const httpCount = Number(httpAgg.count || 0);
+    const httpSum = Number(httpAgg.sum_ms || 0);
+    const httpAvg = httpCount > 0 ? httpSum / httpCount : 0;
+    setText("http-count", fmtNum(httpAgg.count));
+    setText("http-avg", fmtMs(httpAvg));
+    setText("http-max", fmtMs(httpAgg.max_ms));
+
+    const openaiAgg = latency.openai_call_ms || {};
+    const openaiCount = Number(openaiAgg.count || 0);
+    const openaiSum = Number(openaiAgg.sum_ms || 0);
+    const openaiAvg = openaiCount > 0 ? openaiSum / openaiCount : 0;
+    setText("openai-count", fmtNum(openaiAgg.count));
+    setText("openai-avg", fmtMs(openaiAvg));
+    setText("openai-max", fmtMs(openaiAgg.max_ms));
+
+    rawEl.textContent = JSON.stringify(payload, null, 2);
+  }
+
+  async function refresh() {
+    try {
+      statusEl.textContent = "Loading...";
+      const resp = await fetch("/api/metrics");
+      requestIdEl.textContent = resp.headers.get("x-request-id") || "-";
+
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        statusEl.textContent = payload.detail || `Request failed (${resp.status})`;
+        rawEl.textContent = JSON.stringify(payload, null, 2);
+        return;
+      }
+
+      render(payload);
+      statusEl.textContent = "OK";
+      updatedAtEl.textContent = new Date().toLocaleString();
+    } catch (e) {
+      statusEl.textContent = "Error fetching metrics.";
+      rawEl.textContent = String(e);
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 30000);
+
+  logoutBtn.addEventListener("click", async () => {
+    await fetch("/auth/logout", { method: "POST" });
+    window.location.href = "/login";
+  });
+</script>
+{% endblock %}
+

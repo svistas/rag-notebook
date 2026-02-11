@@ -9,6 +9,34 @@ services:
       - "5432:5432"
     volumes:
       - rag_notebook_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag_notebook"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql+psycopg://rag:rag@db:5432/rag_notebook
+      UPLOAD_DIR: /data/uploads
+      CHROMA_DIR: /data/chroma
+      CHROMA_COLLECTION: documents
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      ENABLE_METRICS_ENDPOINT: ${ENABLE_METRICS_ENDPOINT:-True}
+    volumes:
+      - rag_notebook_uploads:/data/uploads
+      - rag_notebook_chroma:/data/chroma
+    command: ["bash", "-lc", "docker/wait_for_db.sh && docker/migrate.sh && docker/start.sh"]
 
 volumes:
   rag_notebook_pgdata:
+  rag_notebook_uploads:
+  rag_notebook_chroma:

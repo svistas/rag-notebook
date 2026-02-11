@@ -5,6 +5,7 @@ import uuid
 from fastapi import Cookie, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+import structlog
 
 from app.config import get_settings
 from app.db.models import User
@@ -33,5 +34,8 @@ def get_current_user(
     user = db.execute(select(User).where(User.id == user_uuid)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    # Add user context for structured logs within this request.
+    structlog.contextvars.bind_contextvars(user_id=str(user.id))
     return user
 
