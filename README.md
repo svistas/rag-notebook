@@ -77,7 +77,7 @@ flowchart TD
 
   subgraph obs [Observability]
     Logs[Structured_JSON_Logs]
-    MetricsAPI[/api/metrics]
+    MetricsAPI["/api/metrics"]
     InMem[InMemory_Metrics]
   end
 
