@@ -1,4 +1,4 @@
-# RAG Notebook (Weeks 1-3)
+# RAG Notebook (Weeks 1-4)
 
 RAG Notebook is a production-style Retrieval-Augmented Generation portfolio project built in weekly vertical slices.
 
@@ -17,6 +17,11 @@ Week 3 improves retrieval quality:
 - Query rewriting before vector search
 - Lightweight reranking of retrieved chunks
 - Debug mode in UI showing rewritten query + chunk selection
+
+Week 4 adds auth + multi-user isolation:
+- Register/login/logout with JWT cookie sessions
+- Per-user document isolation for upload/list/delete/chat
+- Storage backed by Postgres + pgvector (dev via Docker Compose)
 
 ## Tech Stack
 
@@ -63,6 +68,18 @@ cp .env.example .env
 OPENAI_API_KEY=your-real-key
 ```
 
+4. Start Postgres (Week 4):
+
+```bash
+docker compose up -d
+```
+
+5. Run DB migrations:
+
+```bash
+poetry run alembic upgrade head
+```
+
 ## Run the App
 
 ```bash
@@ -70,6 +87,27 @@ poetry run uvicorn app.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000`.
+
+## Offline Evaluation (Week 5)
+
+Run a small golden dataset through the RAG pipeline and write a JSON report:
+
+```bash
+poetry run python -m app.eval --dataset eval/golden.jsonl --out eval/results/latest.json --cleanup
+```
+
+Deterministic mode (no network, good for CI):
+
+```bash
+poetry run python -m app.eval --mock --max-cases 2
+```
+
+What it checks (lightweight heuristics):
+- `retrieval_hit`: required document appears in retrieved chunks
+- `citations_match`: required document appears in citations list
+- `keyword_coverage`: answer contains expected keywords
+- `no_forbidden_keywords`: answer avoids forbidden keywords
+- `abstention_ok`: for \"not in docs\" cases, answer shows uncertainty
 
 ## Run Tests
 
@@ -88,6 +126,7 @@ poetry run pytest -q
 6. Verify the response includes inline citation markers (`[1]`, `[2]`) and expandable source excerpts.
 7. Try `Reindex` and `Delete` from the library.
 8. Toggle `Debug mode` and ask the same question again to inspect rewritten query and retrieved chunks.
+9. Log out, register a second user, and confirm documents are private per account.
 
 ## Week 1 Security Baselines
 
@@ -106,7 +145,7 @@ poetry run pytest -q
 - Debug mode adds a `debug` flag to `/api/chat` responses so you can see:\n  - rewritten query\n  - initial retrieved chunk list\n  - final reranked chunk list\n+- Query rewriting and reranking are controlled by env flags:\n  - `ENABLE_QUERY_REWRITE`\n  - `ENABLE_RERANK`\n  - `RERANK_TOP_N`\n  - `REWRITE_MODEL`\n  - `RERANK_MODEL`\n+
 ## Week 4 Backlog (Preview)
 
-- Authentication + multi-user document isolation
-- Migrate to Postgres + pgvector
-- Access control tests
+- Evaluation harness (golden dataset + deterministic mode)
+- Observability (structured logs + request tracing)
+- Cost and latency tracking for rewrite/rerank calls
 

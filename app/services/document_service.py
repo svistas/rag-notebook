@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.config import get_settings
-from app.db.vector_store import add_chunks, delete_document
+from app.db.models import Chunk, ChunkEmbedding, Document, User
+from app.db.session import get_engine
 from app.models.schemas import DocumentMetadata
 from app.rag.chunking import chunk_text
 from app.rag.embedding import get_embeddings
@@ -19,74 +22,52 @@ _ALLOWED_EXTENSIONS = {".txt", ".md", ".pdf"}
 logger = logging.getLogger(__name__)
 
 
-def _metadata_file() -> Path:
-    settings = get_settings()
-    settings.upload_path.mkdir(parents=True, exist_ok=True)
-    return settings.upload_path / "documents.json"
-
-
-def _load_documents() -> list[DocumentMetadata]:
-    metadata_path = _metadata_file()
-    if not metadata_path.exists():
-        return []
-
-    raw = json.loads(metadata_path.read_text(encoding="utf-8"))
-    return [DocumentMetadata.model_validate(item) for item in raw]
-
-
-def _save_documents(documents: list[DocumentMetadata]) -> None:
-    metadata_path = _metadata_file()
-    payload = [doc.model_dump(mode="json") for doc in documents]
-    metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
 def _sanitize_filename(filename: str) -> str:
     base = Path(filename).name
     sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", base)
     return sanitized or "document.txt"
 
 
-def _find_stored_path(doc_id: str, stored_filename: str | None) -> Path | None:
+def _user_upload_dir(user_id: str) -> Path:
+    settings = get_settings()
+    path = settings.upload_path / user_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _find_stored_path(user_id: str, doc_id: str, stored_filename: str | None) -> Path | None:
     settings = get_settings()
     if stored_filename:
-        candidate = settings.upload_path / stored_filename
+        candidate = settings.upload_path / user_id / stored_filename
         if candidate.exists():
             return candidate
 
     pattern = f"{doc_id}_"
-    for path in settings.upload_path.glob(f"{doc_id}_*"):
+    for path in (settings.upload_path / user_id).glob(f"{doc_id}_*"):
         if path.is_file() and path.name.startswith(pattern):
             return path
     return None
 
 
-def get_document(doc_id: str) -> DocumentMetadata | None:
-    for doc in _load_documents():
-        if doc.id == doc_id:
-            return doc
-    return None
+def _to_metadata(doc: Document) -> DocumentMetadata:
+    return DocumentMetadata(
+        id=str(doc.id),
+        filename=doc.filename,
+        stored_filename=doc.stored_filename,
+        chunk_count=doc.chunk_count,
+        uploaded_at=doc.uploaded_at,
+        indexed_at=doc.indexed_at,
+        error_message=doc.error_message,
+        status=doc.status,  # type: ignore[arg-type]
+    )
 
 
-def _upsert_document(updated: DocumentMetadata) -> DocumentMetadata:
-    documents = _load_documents()
-    replaced = False
-    for idx, doc in enumerate(documents):
-        if doc.id == updated.id:
-            documents[idx] = updated
-            replaced = True
-            break
-    if not replaced:
-        documents.append(updated)
-    _save_documents(documents)
-    return updated
-
-
-def create_document_record(filename: str, content: bytes) -> DocumentMetadata:
+def create_document_record(db: Session, user: User, filename: str, content: bytes) -> DocumentMetadata:
     settings = get_settings()
     safe_name = _sanitize_filename(filename)
     extension = Path(safe_name).suffix.lower()
     if extension not in _ALLOWED_EXTENSIONS:
-        raise ValueError("Only .txt and .md files are supported")
+        raise ValueError("Only .txt, .md, and .pdf files are supported")
 
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -100,38 +81,48 @@ def create_document_record(filename: str, content: bytes) -> DocumentMetadata:
             raise ValueError("File must be UTF-8 encoded text") from exc
 
     doc_id = str(uuid.uuid4())
-    destination = settings.upload_path / f"{doc_id}_{safe_name}"
+    destination = _user_upload_dir(str(user.id)) / f"{doc_id}_{safe_name}"
     destination.write_bytes(content)
 
-    metadata = DocumentMetadata(
-        id=doc_id,
+    now = datetime.now(timezone.utc)
+    doc = Document(
+        id=uuid.UUID(doc_id),
+        user_id=user.id,
         filename=safe_name,
         stored_filename=destination.name,
-        chunk_count=0,
-        uploaded_at=datetime.now(timezone.utc),
         status="queued",
+        chunk_count=0,
+        uploaded_at=now,
+        indexed_at=None,
+        error_message=None,
     )
-    logger.info("upload.accepted", extra={"doc_id": doc_id, "document_name": safe_name})
-    return _upsert_document(metadata)
+    db.add(doc)
+    db.commit()
+
+    logger.info("upload.accepted", extra={"doc_id": doc_id, "document_name": safe_name, "user_id": str(user.id)})
+    return _to_metadata(doc)
 
 
-def index_document(doc_id: str) -> DocumentMetadata:
-    existing = get_document(doc_id)
-    if existing is None:
+def index_document(db: Session, user: User, doc_id: str) -> DocumentMetadata:
+    doc_uuid = uuid.UUID(doc_id)
+    doc = db.execute(select(Document).where(Document.id == doc_uuid, Document.user_id == user.id)).scalar_one_or_none()
+    if not doc:
         raise ValueError("Document not found")
 
-    existing.status = "indexing"
-    existing.error_message = None
-    _upsert_document(existing)
+    doc.status = "indexing"
+    doc.error_message = None
+    db.add(doc)
+    db.commit()
 
-    logger.info("index.start", extra={"doc_id": doc_id, "document_name": existing.filename})
+    logger.info("index.start", extra={"doc_id": doc_id, "document_name": doc.filename, "user_id": str(user.id)})
 
-    stored_path = _find_stored_path(doc_id, existing.stored_filename)
+    stored_path = _find_stored_path(str(user.id), doc_id, doc.stored_filename)
     if stored_path is None:
-        existing.status = "failed"
-        existing.error_message = "Stored file not found on disk"
-        _upsert_document(existing)
-        return existing
+        doc.status = "failed"
+        doc.error_message = "Stored file not found on disk"
+        db.add(doc)
+        db.commit()
+        return _to_metadata(doc)
 
     try:
         content = stored_path.read_bytes()
@@ -147,68 +138,99 @@ def index_document(doc_id: str) -> DocumentMetadata:
         if not chunks:
             raise ValueError("Document is empty after preprocessing")
 
+        # Clear any existing chunks/embeddings for idempotency.
+        chunk_ids_subq = select(Chunk.id).where(Chunk.document_id == doc.id)
+        db.execute(delete(ChunkEmbedding).where(ChunkEmbedding.chunk_id.in_(chunk_ids_subq)))
+        db.execute(delete(Chunk).where(Chunk.document_id == doc.id))
+        db.commit()
+
         chunk_texts = [chunk.text for chunk in chunks]
         embeddings = get_embeddings(chunk_texts)
-        add_chunks(doc_id=doc_id, document_name=existing.filename, chunks=chunks, embeddings=embeddings)
+        for chunk_model, embedding in zip(chunks, embeddings):
+            chunk_row = Chunk(
+                id=uuid.uuid4(),
+                document_id=doc.id,
+                chunk_index=chunk_model.chunk_index,
+                start_char=chunk_model.start_char,
+                end_char=chunk_model.end_char,
+                text=chunk_model.text,
+            )
+            db.add(chunk_row)
+            db.flush()
+            db.add(ChunkEmbedding(chunk_id=chunk_row.id, embedding=embedding))
+        db.commit()
 
-        existing.chunk_count = len(chunks)
-        existing.indexed_at = datetime.now(timezone.utc)
-        existing.status = "indexed"
-        _upsert_document(existing)
+        doc.chunk_count = len(chunks)
+        doc.indexed_at = datetime.now(timezone.utc)
+        doc.status = "indexed"
+        doc.error_message = None
+        db.add(doc)
+        db.commit()
         logger.info(
             "index.complete",
-            extra={"doc_id": doc_id, "document_name": existing.filename, "chunk_count": existing.chunk_count},
+            extra={"doc_id": doc_id, "document_name": doc.filename, "chunk_count": doc.chunk_count, "user_id": str(user.id)},
         )
-        return existing
+        return _to_metadata(doc)
     except Exception as exc:  # noqa: BLE001 - persist failure for UI debugging
-        existing.status = "failed"
-        existing.error_message = str(exc)
-        _upsert_document(existing)
-        logger.exception("index.failed", extra={"doc_id": doc_id, "document_name": existing.filename})
-        return existing
+        doc.status = "failed"
+        doc.error_message = str(exc)
+        db.add(doc)
+        db.commit()
+        logger.exception("index.failed", extra={"doc_id": doc_id, "document_name": doc.filename, "user_id": str(user.id)})
+        return _to_metadata(doc)
 
 
-def ingest_document(filename: str, content: bytes) -> DocumentMetadata:
+def index_document_task(user_id: str, doc_id: str) -> None:
     """
-    Backward-compatible synchronous ingest (Week 1 behavior).
-
-    Week 2 uses background indexing, but keeping this avoids breaking callers/tests
-    that may rely on a single-call ingestion path.
+    BackgroundTasks entrypoint: create a new DB session, load user, index.
     """
-    record = create_document_record(filename=filename, content=content)
-    return index_document(record.id)
+    engine = get_engine()
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    with SessionLocal() as db:
+        user_uuid = uuid.UUID(user_id)
+        user = db.execute(select(User).where(User.id == user_uuid)).scalar_one()
+        index_document(db=db, user=user, doc_id=doc_id)
 
 
-def list_documents() -> list[DocumentMetadata]:
-    return _load_documents()
+def list_documents(db: Session, user: User) -> list[DocumentMetadata]:
+    docs = db.execute(select(Document).where(Document.user_id == user.id).order_by(Document.uploaded_at.desc())).scalars().all()
+    return [_to_metadata(d) for d in docs]
 
 
-def delete_document_everywhere(doc_id: str) -> None:
-    doc = get_document(doc_id)
-    if doc is None:
+def get_document(db: Session, user: User, doc_id: str) -> DocumentMetadata | None:
+    doc_uuid = uuid.UUID(doc_id)
+    d = db.execute(select(Document).where(Document.id == doc_uuid, Document.user_id == user.id)).scalar_one_or_none()
+    return _to_metadata(d) if d else None
+
+
+def delete_document_everywhere(db: Session, user: User, doc_id: str) -> None:
+    doc_uuid = uuid.UUID(doc_id)
+    d = db.execute(select(Document).where(Document.id == doc_uuid, Document.user_id == user.id)).scalar_one_or_none()
+    if not d:
         raise ValueError("Document not found")
 
-    # Remove vectors first (safe to call even if nothing exists).
-    delete_document(doc_id)
-
-    stored_path = _find_stored_path(doc_id, doc.stored_filename)
+    stored_path = _find_stored_path(str(user.id), doc_id, d.stored_filename)
     if stored_path and stored_path.exists():
         stored_path.unlink()
 
-    documents = [d for d in _load_documents() if d.id != doc_id]
-    _save_documents(documents)
+    db.execute(delete(Document).where(Document.id == d.id))
+    db.commit()
 
 
-def mark_queued(doc_id: str) -> DocumentMetadata:
-    doc = get_document(doc_id)
-    if doc is None:
+def mark_queued(db: Session, user: User, doc_id: str) -> DocumentMetadata:
+    doc_uuid = uuid.UUID(doc_id)
+    d = db.execute(select(Document).where(Document.id == doc_uuid, Document.user_id == user.id)).scalar_one_or_none()
+    if not d:
         raise ValueError("Document not found")
 
-    # Reindex should start from a clean slate.
-    delete_document(doc_id)
+    chunk_ids_subq = select(Chunk.id).where(Chunk.document_id == d.id)
+    db.execute(delete(ChunkEmbedding).where(ChunkEmbedding.chunk_id.in_(chunk_ids_subq)))
+    db.execute(delete(Chunk).where(Chunk.document_id == d.id))
 
-    doc.status = "queued"
-    doc.error_message = None
-    doc.indexed_at = None
-    doc.chunk_count = 0
-    return _upsert_document(doc)
+    d.status = "queued"
+    d.error_message = None
+    d.indexed_at = None
+    d.chunk_count = 0
+    db.add(d)
+    db.commit()
+    return _to_metadata(d)

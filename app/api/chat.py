@@ -1,26 +1,31 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from app.models.schemas import ChatRequest, ChatResponse
+from app.db.models import User
+from app.db.session import get_db
 from app.rag.prompting import generate_answer
-from app.rag.retrieval import retrieve, retrieve_with_debug
+from app.rag.retrieval import retrieve_with_debug
+from app.services.auth_dependencies import get_current_user
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_documents(payload: ChatRequest) -> ChatResponse:
+async def chat_with_documents(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ChatResponse:
     query = payload.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty")
 
     debug_requested = bool(payload.debug)
-    if debug_requested:
-        result = retrieve_with_debug(user_query=query)
-        chunks = result.final_chunks
-    else:
-        chunks = retrieve(query=query)
+    result = retrieve_with_debug(db=db, user=user, user_query=query)
+    chunks = result.final_chunks
 
     if not chunks:
         return ChatResponse(

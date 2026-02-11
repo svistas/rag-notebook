@@ -9,6 +9,8 @@ from httpx import ASGITransport, AsyncClient
 
 from app.config import get_settings
 from app.db.vector_store import set_chroma_client
+from app.db.models import Base
+from app.db.session import get_engine
 from app.main import app
 from app.rag.embedding import set_embedding_client
 from app.rag.prompting import set_chat_client
@@ -146,6 +148,9 @@ def test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "chroma"))
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+pysqlite:///{tmp_path / 'test.db'}")
+    monkeypatch.setenv("JWT_SECRET", "test-secret")
+    monkeypatch.setenv("JWT_COOKIE_NAME", "rag_session")
     get_settings.cache_clear()
 
     mock_client = MockOpenAIClient()
@@ -158,6 +163,10 @@ def test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     settings = get_settings()
     settings.upload_path.mkdir(parents=True, exist_ok=True)
     settings.chroma_path.mkdir(parents=True, exist_ok=True)
+
+    # Create DB schema for SQLite tests.
+    engine = get_engine()
+    Base.metadata.create_all(bind=engine)
 
     yield
 

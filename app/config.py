@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     chroma_collection: str = Field(default="documents", alias="CHROMA_COLLECTION")
     max_upload_size_mb: int = Field(default=5, alias="MAX_UPLOAD_SIZE_MB")
 
+    database_url: str = Field(
+        default="postgresql+psycopg://rag:rag@localhost:5432/rag_notebook",
+        alias="DATABASE_URL",
+    )
+    jwt_secret: str = Field(default="change-me", alias="JWT_SECRET")
+    jwt_cookie_name: str = Field(default="rag_session", alias="JWT_COOKIE_NAME")
+    jwt_exp_minutes: int = Field(default=60 * 24 * 7, alias="JWT_EXP_MINUTES")
+
     @property
     def upload_path(self) -> Path:
         return Path(self.upload_dir)
