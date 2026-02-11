@@ -33,11 +33,22 @@ class Citation(BaseModel):
 
 class ChatRequest(BaseModel):
     query: str = Field(min_length=1)
+    debug: bool = False
+
+
+class ChatDebug(BaseModel):
+    user_query: str
+    rewritten_query: str
+    initial_chunks: list[RetrievedChunk]
+    final_chunks: list[RetrievedChunk]
+    rewrite_enabled: bool
+    rerank_enabled: bool
 
 
 class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
+    debug: ChatDebug | None = None
 
 
 class DocumentMetadata(BaseModel):

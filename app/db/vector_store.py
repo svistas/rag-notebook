@@ -99,7 +99,11 @@ def query_by_embedding(query_embedding: list[float], top_k: int) -> list[Retriev
     ids = result.get("ids", [[]])[0]
 
     rows: list[RetrievedChunk] = []
+    seen_ids: set[str] = set()
     for doc, meta, distance, chunk_id in zip(documents, metadatas, distances, ids):
+        if chunk_id in seen_ids:
+            continue
+        seen_ids.add(chunk_id)
         score = 1 - distance if distance is not None else 0.0
         rows.append(
             RetrievedChunk(

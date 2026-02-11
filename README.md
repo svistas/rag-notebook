@@ -1,4 +1,4 @@
-# RAG Notebook (Weeks 1-2)
+# RAG Notebook (Weeks 1-3)
 
 RAG Notebook is a production-style Retrieval-Augmented Generation portfolio project built in weekly vertical slices.
 
@@ -12,6 +12,11 @@ Week 2 adds document management:
 - Document library shows indexing state (`queued`, `indexing`, `indexed`, `failed`)
 - Upload returns immediately and indexing runs in the background
 - Delete and reindex document actions
+
+Week 3 improves retrieval quality:
+- Query rewriting before vector search
+- Lightweight reranking of retrieved chunks
+- Debug mode in UI showing rewritten query + chunk selection
 
 ## Tech Stack
 
@@ -81,6 +86,7 @@ poetry run pytest -q
 5. Ask a question in the chat panel.
 6. Verify the response includes inline citation markers (`[1]`, `[2]`) and expandable source excerpts.
 7. Try `Reindex` and `Delete` from the library.
+8. Toggle `Debug mode` and ask the same question again to inspect rewritten query and retrieved chunks.
 
 ## Week 1 Security Baselines
 
@@ -94,9 +100,12 @@ poetry run pytest -q
 - Upload immediately returns a `queued` document and indexing happens asynchronously using FastAPI background tasks.
 - Document metadata is stored locally in `data/documents.json` (kept intentionally simple for Week 2).
 
-## Week 3 Backlog (Preview)
+## Week 3 Notes
 
-- Retrieval quality upgrades (query rewriting or hybrid search)
-- Debug UI showing retrieved chunks + scores per chat request
-- Golden Q/A dataset and deterministic eval mode
+- Debug mode adds a `debug` flag to `/api/chat` responses so you can see:\n  - rewritten query\n  - initial retrieved chunk list\n  - final reranked chunk list\n+- Query rewriting and reranking are controlled by env flags:\n  - `ENABLE_QUERY_REWRITE`\n  - `ENABLE_RERANK`\n  - `RERANK_TOP_N`\n  - `REWRITE_MODEL`\n  - `RERANK_MODEL`\n+
+## Week 4 Backlog (Preview)
+
+- Authentication + multi-user document isolation
+- Migrate to Postgres + pgvector
+- Access control tests
 

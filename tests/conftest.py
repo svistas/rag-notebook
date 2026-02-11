@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import AsyncIterator
 
@@ -11,6 +12,8 @@ from app.db.vector_store import set_chroma_client
 from app.main import app
 from app.rag.embedding import set_embedding_client
 from app.rag.prompting import set_chat_client
+from app.rag.query_rewrite import set_rewrite_client
+from app.rag.rerank import set_rerank_client
 
 
 def _text_to_vector(text: str, dims: int = 8) -> list[float]:
@@ -55,7 +58,28 @@ class _ChatResponse:
 class MockChatCompletionsApi:
     def create(self, model: str, messages: list[dict], temperature: float) -> _ChatResponse:
         _ = model, temperature
-        question = messages[-1]["content"].split("Question:\n", 1)[-1].split("\n\nContext:", 1)[0]
+        system = (messages[0].get("content") or "").lower()
+        user = messages[-1].get("content") or ""
+
+        # Week 3 query rewriting: return plain rewritten query.
+        if "rewrite user questions" in system or "rewrite user question" in system:
+            cleaned = user.split("User question:\n", 1)[-1].split("\n\nRewritten retrieval query:", 1)[0].strip()
+            return _ChatResponse(f"retrieval: {cleaned}")
+
+        # Week 3 reranking: return strict JSON {"ranked_ids":[...]}
+        if "reranking model" in system and "ranked_ids" in system:
+            try:
+                payload = json.loads(user)
+                candidates = payload.get("candidates", [])
+                ids = [c.get("id") for c in candidates if isinstance(c, dict) and isinstance(c.get("id"), str)]
+                top_n = int(payload.get("top_n", 5))
+                ranked = ids[:top_n]
+            except Exception:
+                ranked = []
+            return _ChatResponse(json.dumps({"ranked_ids": ranked}))
+
+        # Default: Week 1/2 answering behavior with a citation marker.
+        question = user.split("Question:\n", 1)[-1].split("\n\nContext:", 1)[0]
         return _ChatResponse(f"Mock answer for: {question} [1]")
 
 
@@ -127,6 +151,8 @@ def test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     mock_client = MockOpenAIClient()
     set_embedding_client(mock_client)
     set_chat_client(mock_client)
+    set_rewrite_client(mock_client)
+    set_rerank_client(mock_client)
     set_chroma_client(MockChromaClient())
 
     settings = get_settings()
@@ -137,6 +163,8 @@ def test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 
     set_embedding_client(None)
     set_chat_client(None)
+    set_rewrite_client(None)
+    set_rerank_client(None)
     set_chroma_client(None)
     get_settings.cache_clear()
 

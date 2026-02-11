@@ -32,6 +32,7 @@ async def test_chat_endpoint_returns_answer_with_citations(api_client) -> None:
     assert "answer" in payload
     assert isinstance(payload["citations"], list)
     assert len(payload["citations"]) >= 1
+    assert payload.get("debug") is None
 
 
 async def test_documents_endpoint_lists_uploaded_documents(api_client) -> None:
@@ -79,3 +80,21 @@ async def test_reindex_endpoint_queues_and_allows_reindex(api_client) -> None:
     indexed = doc_resp.json()
     assert indexed["status"] == "indexed"
     assert indexed["chunk_count"] >= 1
+
+
+async def test_chat_debug_mode_returns_retrieval_trace(api_client) -> None:
+    files = {"file": ("guide.md", io.BytesIO(b"RAG uses retrieval and generation with grounding."), "text/markdown")}
+    upload_response = await api_client.post("/api/upload", files=files)
+    assert upload_response.status_code == 200
+    doc_id = upload_response.json()["document"]["id"]
+    index_document(doc_id)
+
+    response = await api_client.post("/api/chat", json={"query": "What is RAG?", "debug": True})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload.get("debug") is not None
+    dbg = payload["debug"]
+    assert dbg["user_query"] == "What is RAG?"
+    assert "rewritten_query" in dbg
+    assert isinstance(dbg["initial_chunks"], list)
+    assert isinstance(dbg["final_chunks"], list)

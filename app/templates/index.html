@@ -23,6 +23,13 @@
     <section class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 space-y-4">
       <h2 class="text-lg font-medium">Chat</h2>
       <div id="chat-log" class="h-[480px] overflow-y-auto bg-slate-50 border border-slate-200 rounded p-3 space-y-3"></div>
+      <div class="flex items-center justify-between">
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input id="debug-toggle" type="checkbox" class="rounded border-slate-300" />
+          Debug mode
+        </label>
+        <p class="text-xs text-slate-500">Shows rewritten query and retrieved chunks.</p>
+      </div>
       <form id="chat-form" class="flex gap-2">
         <input id="chat-input" type="text" placeholder="Ask a question about your documents..."
                class="flex-1 border border-slate-300 rounded px-3 py-2" />
@@ -39,11 +46,27 @@
   const documentsList = document.getElementById("documents-list");
   const chatForm = document.getElementById("chat-form");
   const chatInput = document.getElementById("chat-input");
+  const debugToggle = document.getElementById("debug-toggle");
   const chatLog = document.getElementById("chat-log");
   let documentsPollHandle = null;
   let lastUploadedDocId = null;
 
-  function appendMessage(role, text, citations = []) {
+  function renderChunkList(chunks) {
+    const list = document.createElement("ol");
+    list.className = "list-decimal ml-5 space-y-1";
+    chunks.forEach((c) => {
+      const li = document.createElement("li");
+      li.className = "text-xs text-slate-700";
+      const preview = (c.text || "").slice(0, 160).replaceAll("\n", " ");
+      const chunkId = c.id ? String(c.id).slice(-8) : "unknown";
+      const docId = c.doc_id ? String(c.doc_id).slice(-8) : "unknown";
+      li.textContent = `${c.document_name}#${c.chunk_index} doc=${docId} chunk=${chunkId} score=${(c.score ?? 0).toFixed(3)}: ${preview}...`;
+      list.appendChild(li);
+    });
+    return list;
+  }
+
+  function appendMessage(role, text, citations = [], debug = null) {
     const wrapper = document.createElement("div");
     const roleClass = role === "user" ? "bg-blue-50 border-blue-200" : "bg-emerald-50 border-emerald-200";
     wrapper.className = `border ${roleClass} rounded p-3`;
@@ -74,6 +97,53 @@
         citationWrap.appendChild(details);
       });
       wrapper.appendChild(citationWrap);
+    }
+
+    if (role === "assistant" && debug) {
+      const dbg = document.createElement("details");
+      dbg.className = "mt-3 bg-white rounded border border-slate-200 p-2";
+      const sum = document.createElement("summary");
+      sum.className = "text-xs font-medium text-slate-700 cursor-pointer";
+      sum.textContent = "Debug: retrieval trace";
+      dbg.appendChild(sum);
+
+      const meta = document.createElement("div");
+      meta.className = "mt-2 text-xs text-slate-700 space-y-2";
+
+      const q = document.createElement("div");
+      q.className = "space-y-1";
+      const q1 = document.createElement("div");
+      q1.textContent = `user_query: ${debug.user_query}`;
+      const q2 = document.createElement("div");
+      q2.textContent = `rewritten_query: ${debug.rewritten_query}`;
+      q.appendChild(q1);
+      q.appendChild(q2);
+      meta.appendChild(q);
+
+      const initial = document.createElement("div");
+      initial.className = "space-y-1";
+      const initialTitle = document.createElement("div");
+      initialTitle.className = "font-medium";
+      initialTitle.textContent = `initial_chunks (${debug.initial_chunks?.length || 0})`;
+      initial.appendChild(initialTitle);
+      if (debug.initial_chunks && debug.initial_chunks.length) {
+        initial.appendChild(renderChunkList(debug.initial_chunks));
+      }
+      meta.appendChild(initial);
+
+      const final = document.createElement("div");
+      final.className = "space-y-1";
+      const finalTitle = document.createElement("div");
+      finalTitle.className = "font-medium";
+      finalTitle.textContent = `final_chunks (${debug.final_chunks?.length || 0})`;
+      final.appendChild(finalTitle);
+      if (debug.final_chunks && debug.final_chunks.length) {
+        final.appendChild(renderChunkList(debug.final_chunks));
+      }
+      meta.appendChild(final);
+
+      dbg.appendChild(meta);
+      wrapper.appendChild(dbg);
     }
 
     chatLog.appendChild(wrapper);
@@ -257,7 +327,7 @@
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, debug: debugToggle.checked }),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -265,7 +335,7 @@
       return;
     }
 
-    appendMessage("assistant", payload.answer, payload.citations || []);
+    appendMessage("assistant", payload.answer, payload.citations || [], payload.debug || null);
   });
 
   refreshDocuments();
