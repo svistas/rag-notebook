@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6">
+  <header class="bg-white rounded-xl border border-slate-200 p-5">
+    <h1 class="text-2xl font-semibold">RAG Notebook</h1>
+    <p class="text-slate-600 mt-2">Upload a .txt or .md file and ask grounded questions with citations.</p>
+  </header>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <section class="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+      <h2 class="text-lg font-medium">Upload Document</h2>
+      <form id="upload-form" class="space-y-3">
+        <input id="file-input" type="file" accept=".txt,.md" class="block w-full text-sm" />
+        <button class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700" type="submit">Upload</button>
+      </form>
+      <p id="upload-status" class="text-sm text-slate-600"></p>
+      <div>
+        <h3 class="font-medium mb-2">Document Library</h3>
+        <ul id="documents-list" class="text-sm space-y-2"></ul>
+      </div>
+    </section>
+
+    <section class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+      <h2 class="text-lg font-medium">Chat</h2>
+      <div id="chat-log" class="h-[480px] overflow-y-auto bg-slate-50 border border-slate-200 rounded p-3 space-y-3"></div>
+      <form id="chat-form" class="flex gap-2">
+        <input id="chat-input" type="text" placeholder="Ask a question about your documents..."
+               class="flex-1 border border-slate-300 rounded px-3 py-2" />
+        <button class="px-4 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700" type="submit">Ask</button>
+      </form>
+    </section>
+  </div>
+</div>
+
+<script>
+  const uploadForm = document.getElementById("upload-form");
+  const fileInput = document.getElementById("file-input");
+  const uploadStatus = document.getElementById("upload-status");
+  const documentsList = document.getElementById("documents-list");
+  const chatForm = document.getElementById("chat-form");
+  const chatInput = document.getElementById("chat-input");
+  const chatLog = document.getElementById("chat-log");
+
+  function appendMessage(role, text, citations = []) {
+    const wrapper = document.createElement("div");
+    const roleClass = role === "user" ? "bg-blue-50 border-blue-200" : "bg-emerald-50 border-emerald-200";
+    wrapper.className = `border ${roleClass} rounded p-3`;
+
+    const title = document.createElement("p");
+    title.className = "font-medium text-sm mb-1";
+    title.textContent = role === "user" ? "You" : "Assistant";
+    wrapper.appendChild(title);
+
+    const content = document.createElement("p");
+    content.className = "text-sm whitespace-pre-wrap";
+    content.textContent = text;
+    wrapper.appendChild(content);
+
+    if (citations.length > 0) {
+      const citationWrap = document.createElement("div");
+      citationWrap.className = "mt-2 text-xs text-slate-700 space-y-1";
+      citations.forEach((c) => {
+        const details = document.createElement("details");
+        details.className = "bg-white rounded border border-slate-200 p-2";
+        const summary = document.createElement("summary");
+        summary.textContent = `[${c.number}] ${c.document_name} (chunk ${c.chunk_index})`;
+        details.appendChild(summary);
+        const excerpt = document.createElement("p");
+        excerpt.className = "mt-1 whitespace-pre-wrap";
+        excerpt.textContent = c.text;
+        details.appendChild(excerpt);
+        citationWrap.appendChild(details);
+      });
+      wrapper.appendChild(citationWrap);
+    }
+
+    chatLog.appendChild(wrapper);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  async function refreshDocuments() {
+    const response = await fetch("/api/documents");
+    const payload = await response.json();
+    documentsList.innerHTML = "";
+
+    if (!payload.documents || payload.documents.length === 0) {
+      const item = document.createElement("li");
+      item.className = "text-slate-500";
+      item.textContent = "No documents indexed yet.";
+      documentsList.appendChild(item);
+      return;
+    }
+
+    payload.documents.forEach((doc) => {
+      const item = document.createElement("li");
+      item.className = "border border-slate-200 rounded p-2";
+      item.textContent = `${doc.filename} - ${doc.chunk_count} chunks`;
+      documentsList.appendChild(item);
+    });
+  }
+
+  uploadForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!fileInput.files || fileInput.files.length === 0) {
+      uploadStatus.textContent = "Choose a file first.";
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+    uploadStatus.textContent = "Uploading and indexing...";
+
+    const response = await fetch("/api/upload", { method: "POST", body: formData });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      uploadStatus.textContent = payload.detail || "Upload failed.";
+      return;
+    }
+
+    uploadStatus.textContent = `Indexed ${payload.document.filename} (${payload.document.chunk_count} chunks).`;
+    fileInput.value = "";
+    await refreshDocuments();
+  });
+
+  chatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const query = chatInput.value.trim();
+    if (!query) {
+      return;
+    }
+
+    appendMessage("user", query);
+    chatInput.value = "";
+
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      appendMessage("assistant", payload.detail || "Chat failed.");
+      return;
+    }
+
+    appendMessage("assistant", payload.answer, payload.citations || []);
+  });
+
+  refreshDocuments();
+</script>
+{% endblock %}
